@@ -84,14 +84,6 @@ export function JustifiedGrid({
     </ul>
   );
 }
-interface Image {
-  _id: string;
-  href: string;
-  dimensions: {
-    w: number;
-    h: number;
-  };
-}
 interface CreateMasonryLayoutConfig {
   minHeight: number;
   maxHeight: number;
@@ -101,8 +93,7 @@ interface CreateMasonryLayoutConfig {
 }
 interface PendingRow {
   value: Image[];
-  width: number;
-  aspectRatio: number;
+  bounds: { lower: number; upper: number };
 }
 function createMasonryLayout({
   images,
@@ -110,64 +101,102 @@ function createMasonryLayout({
   maxHeight,
   minHeight,
   spaceBetween,
-}: CreateMasonryLayoutConfig): Image[][] {
-  if (containerWidth <= 0) {
-    console.error("MasonryLayout container must have positive width");
-    return [];
+}: CreateMasonryLayoutConfig) {
+  if (containerWidth === 0) {
+    console.error("JustifiedGrid container must have width");
+    return [[]];
   }
-  const fullRows: Image[][] = [];
-  let currentRow: PendingRow = { value: [], width: 0, aspectRatio: 0 };
-  for (const image of images) {
-    const { width, height } = calculateDimensions(image, minHeight, maxHeight);
-    if (
-      currentRow.width + width + spaceBetween > containerWidth &&
-      currentRow.value.length > 0
-    ) {
-      fullRows.push(
-        finalizeRow(currentRow, containerWidth, maxHeight, spaceBetween)
-      );
-      currentRow = { value: [], width: 0, aspectRatio: 0 };
+
+  let fullRows: Image[][] = [];
+  let partialRows: PendingRow[] = [];
+  try {
+    for (let i = 0; i < images.length; i++) {
+      let imageFitInRow = false;
+      const image = images[i];
+      const { lower, upper } = calculateBounds({ image, minHeight, maxHeight });
+      let j = 0;
+      while (j < partialRows.length && !imageFitInRow) {
+        const row = partialRows[j];
+        const allowedWidth =
+          containerWidth - (row.value.length - 1) * spaceBetween;
+        if (row.bounds.upper >= allowedWidth) {
+          console.log(`Row ${fullRows.length} finalized`);
+          fullRows.push(
+            finalizeRow({ maxHeight, containerWidth, row, spaceBetween })
+          );
+          partialRows.splice(j, 1);
+        } else {
+          j++;
+        }
+        if (
+          containerWidth - (row.value.length - 1) * spaceBetween >=
+          lower + row.bounds.lower
+        ) {
+          console.log(`Image ${i} appended to partial row ${j}`);
+          row.value.push(image);
+          row.bounds.lower += lower;
+          row.bounds.upper += upper;
+          imageFitInRow = true;
+        }
+      }
+      if (!imageFitInRow) {
+        console.log(`Partial row ${partialRows.length} created`);
+        partialRows.push({ bounds: { lower, upper }, value: [image] });
+      }
     }
-    currentRow.value.push(image);
-    currentRow.width +=
-      width + (currentRow.value.length > 1 ? spaceBetween : 0);
-    currentRow.aspectRatio += width / height;
-  }
-  if (currentRow.value.length > 0) {
-    fullRows.push(
-      finalizeRow(currentRow, containerWidth, maxHeight, spaceBetween)
-    );
+    console.log(`${partialRows.length} Partial rows remain`);
+    // Slam in any un-finished rows
+    for (let i = 0; i < partialRows.length; i++) {
+      const row = partialRows[i];
+      console.log(
+        `Partial row converted to finalized row ${fullRows.length}`,
+        row
+      );
+      fullRows.push(
+        finalizeRow({ maxHeight, containerWidth, row, spaceBetween })
+      );
+    }
+  } catch (e) {
+    console.error(e);
+    console.warn({ fullRows, partialRows });
   }
   return fullRows;
 }
-function calculateDimensions(
-  image: Image,
-  minHeight: number,
-  maxHeight: number
-): { width: number; height: number } {
-  const aspectRatio = image.dimensions.w / image.dimensions.h;
-  const height = Math.min(Math.max(minHeight, image.dimensions.h), maxHeight);
-  const width = Math.floor(height * aspectRatio);
-  return { width, height };
+function finalizeRow({
+  maxHeight,
+  containerWidth,
+  row,
+  spaceBetween,
+}: {
+  maxHeight: number;
+  containerWidth: number;
+  row: PendingRow;
+  spaceBetween: number;
+}) {
+  const allowedWidth = containerWidth - (row.value.length - 1) * spaceBetween;
+  const finalHeight = (maxHeight * allowedWidth) / row.bounds.upper;
+  return row.value.map((r) => ({
+    ...r,
+    dimensions: {
+      w: Math.floor((r.dimensions.w * finalHeight) / r.dimensions.h),
+      h: Math.floor(finalHeight),
+    },
+  }));
 }
-function finalizeRow(
-  row: PendingRow,
-  containerWidth: number,
-  maxHeight: number,
-  spaceBetween: number
-): Image[] {
-  const rowWidth = containerWidth - (row.value.length - 1) * spaceBetween;
-  const scaleFactor = rowWidth / row.width;
-  return row.value.map((image) => {
-    const { width, height } = calculateDimensions(image, 0, maxHeight);
-    return {
-      ...image,
-      dimensions: {
-        w: Math.floor(width * scaleFactor),
-        h: Math.floor(height * scaleFactor),
-      },
-    };
-  });
+function calculateBounds({
+  image,
+  minHeight,
+  maxHeight,
+}: {
+  image: Image;
+  minHeight: number;
+  maxHeight: number;
+}) {
+  const aspectRatio = image.dimensions.w / image.dimensions.h;
+  return {
+    lower: Math.floor(minHeight * aspectRatio),
+    upper: Math.ceil(maxHeight * aspectRatio),
+  };
 }
 const debounce = (fn: Function, ms = 300) => {
   let timeoutId: ReturnType<typeof setTimeout>;
