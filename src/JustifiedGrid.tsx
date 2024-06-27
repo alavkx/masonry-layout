@@ -114,7 +114,8 @@ function createMasonryLayout({
       let imageFitInRow = false;
       const image = images[i];
       const { lower, upper } = calculateBounds({ image, minHeight, maxHeight });
-      for (let j = 0; j < partialRows.length; j++) {
+      let j = 0;
+      while (j < partialRows.length && !imageFitInRow) {
         const row = partialRows[j];
         const allowedWidth =
           containerWidth - (row.value.length - 1) * spaceBetween;
@@ -123,8 +124,9 @@ function createMasonryLayout({
           fullRows.push(
             finalizeRow({ maxHeight, containerWidth, row, spaceBetween })
           );
-          delete partialRows[j];
-          partialRows.length -= 1;
+          partialRows.splice(j, 1);
+        } else {
+          j++;
         }
         if (
           containerWidth - (row.value.length - 1) * spaceBetween >=
@@ -155,7 +157,8 @@ function createMasonryLayout({
       );
     }
   } catch (e) {
-    console.error({ fullRows, partialRows });
+    console.error(e);
+    console.warn({ fullRows, partialRows });
   }
   return fullRows;
 }
